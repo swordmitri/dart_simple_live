@@ -28,16 +28,17 @@ jobs:
         run: flutter pub get
         working-directory: simple_live_app
 
-      # 2. 强制 Gradle 8.14
+      # 2. 强制 Gradle 8.14（整行覆盖，兼容 -all.zip / -bin.zip）
       - name: Force Gradle 8.14 in wrapper
         run: |
           cd simple_live_app/android
-          if [ -f gradle/wrapper/gradle-wrapper.properties ]; then
-            sed -i 's|distributionUrl=.*gradle-.*-bin.zip|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14-bin.zip|' gradle/wrapper/gradle-wrapper.properties
-            echo "--- gradle-wrapper.properties ---"
-            cat gradle/wrapper/gradle-wrapper.properties
-          else
-            echo "错误：未找到 gradle-wrapper.properties"
+          echo "--- 修改前 gradle-wrapper.properties ---"
+          cat gradle/wrapper/gradle-wrapper.properties
+          sed -i 's|^distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14-all.zip|' gradle/wrapper/gradle-wrapper.properties
+          echo "--- 修改后 gradle-wrapper.properties ---"
+          cat gradle/wrapper/gradle-wrapper.properties
+          if ! grep -q "gradle-8.14-all.zip" gradle/wrapper/gradle-wrapper.properties; then
+            echo "错误：Gradle 版本替换失败"
             exit 1
           fi
 
@@ -60,16 +61,10 @@ jobs:
             exit 1
           fi
 
-      # 4. 核心：把所有插件 build.gradle 里写死的 AGP classpath 全部降级到 8.11.1
+      # 4. 批量降级所有插件的 AGP classpath 到 8.11.1
       - name: Downgrade AGP classpath in all plugins
         run: |
           PUB_CACHE="$HOME/.pub-cache/hosted/pub.dev"
-          echo "=== pub-cache 目录 ==="
-          ls "$PUB_CACHE" | head -50
-
-          echo "=== 修改前，包含高版本 AGP 的插件 build.gradle ==="
-          grep -rlE "com\.android\.tools\.build:gradle:([0-9]+\.)" "$PUB_CACHE" --include="build.gradle" 2>/dev/null || echo "未找到任何声明 AGP 的插件"
-
           echo "=== 开始批量降级 AGP 到 8.11.1 ==="
           find "$PUB_CACHE" -name "build.gradle" -type f 2>/dev/null | while read -r f; do
             if grep -qE "com\.android\.tools\.build:gradle:[0-9]" "$f"; then
@@ -77,11 +72,9 @@ jobs:
               echo "已修改: $f"
             fi
           done
+          echo "=== 修改完成 ==="
 
-          echo "=== 修改后，再次检查 ==="
-          grep -rE "com\.android\.tools\.build:gradle:[0-9]" "$PUB_CACHE" --include="build.gradle" 2>/dev/null || echo "已全部替换为 8.11.1"
-
-      # 5. 给缺 namespace 的插件补 namespace（保留这一步作为兜底）
+      # 5. 给缺 namespace 的插件补 namespace（兜底）
       - name: Patch auto_orientation_v2 namespace
         run: |
           PLUGIN_DIR="$HOME/.pub-cache/hosted/pub.dev/auto_orientation_v2-2.4.7/android"
