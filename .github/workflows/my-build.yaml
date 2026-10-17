@@ -23,58 +23,61 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # 1. 先获取依赖，确保插件下载到 ~/.pub-cache
+      # 1. 获取依赖
       - name: Flutter pub get
         run: flutter pub get
         working-directory: simple_live_app
 
-      # 2. 强制 Gradle 8.14（整行覆盖，兼容 -all.zip / -bin.zip）
+      # 2. 【新增】生成占位的 key.properties，避免签名配置报错
+      - name: Create placeholder key.properties for signing
+        run: |
+          cd simple_live_app/android
+          echo "storePassword=android" > key.properties
+          echo "keyPassword=android" >> key.properties
+          echo "keyAlias=androiddebugkey" >> key.properties
+          echo "storeFile=../debug.keystore" >> key.properties
+          echo "--- 已生成 key.properties ---"
+          cat key.properties
+
+      # 3. 强制 Gradle 8.14（整行覆盖，兼容 -all.zip / -bin.zip）
       - name: Force Gradle 8.14 in wrapper
         run: |
           cd simple_live_app/android
-          echo "--- 修改前 gradle-wrapper.properties ---"
-          cat gradle/wrapper/gradle-wrapper.properties
           sed -i 's|^distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14-all.zip|' gradle/wrapper/gradle-wrapper.properties
-          echo "--- 修改后 gradle-wrapper.properties ---"
+          echo "--- gradle-wrapper.properties ---"
           cat gradle/wrapper/gradle-wrapper.properties
           if ! grep -q "gradle-8.14-all.zip" gradle/wrapper/gradle-wrapper.properties; then
             echo "错误：Gradle 版本替换失败"
             exit 1
           fi
 
-      # 3. 修改主项目 settings.gradle(.kts) 的 AGP / Kotlin 版本
+      # 4. 修改主项目 settings.gradle(.kts) 的 AGP / Kotlin 版本
       - name: Force AGP 8.11.1 and Kotlin 2.2.20 in settings.gradle
         run: |
           cd simple_live_app/android
           if [ -f settings.gradle ]; then
             sed -i 's/id "com.android.application" version "[^"]*"/id "com.android.application" version "8.11.1"/' settings.gradle
             sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "2.2.20"/' settings.gradle
-            echo "--- settings.gradle ---"
-            cat settings.gradle
           elif [ -f settings.gradle.kts ]; then
             sed -i 's/id("com.android.application") version "[^"]*"/id("com.android.application") version "8.11.1"/' settings.gradle.kts
             sed -i 's/id("org.jetbrains.kotlin.android") version "[^"]*"/id("org.jetbrains.kotlin.android") version "2.2.20"/' settings.gradle.kts
-            echo "--- settings.gradle.kts ---"
-            cat settings.gradle.kts
           else
             echo "错误：未找到 settings.gradle 或 settings.gradle.kts"
             exit 1
           fi
 
-      # 4. 批量降级所有插件的 AGP classpath 到 8.11.1
+      # 5. 批量降级所有插件的 AGP classpath 到 8.11.1
       - name: Downgrade AGP classpath in all plugins
         run: |
           PUB_CACHE="$HOME/.pub-cache/hosted/pub.dev"
-          echo "=== 开始批量降级 AGP 到 8.11.1 ==="
           find "$PUB_CACHE" -name "build.gradle" -type f 2>/dev/null | while read -r f; do
             if grep -qE "com\.android\.tools\.build:gradle:[0-9]" "$f"; then
               sed -i -E "s|com\.android\.tools\.build:gradle:[0-9]+\.[0-9]+\.[0-9]+|com.android.tools.build:gradle:8.11.1|g" "$f"
-              echo "已修改: $f"
             fi
           done
-          echo "=== 修改完成 ==="
+          echo "AGP 降级完成"
 
-      # 5. 给缺 namespace 的插件补 namespace（兜底）
+      # 6. 给缺 namespace 的插件补 namespace（兜底）
       - name: Patch auto_orientation_v2 namespace
         run: |
           PLUGIN_DIR="$HOME/.pub-cache/hosted/pub.dev/auto_orientation_v2-2.4.7/android"
@@ -85,16 +88,14 @@ jobs:
             else
               echo "auto_orientation_v2 已包含 namespace，跳过"
             fi
-          else
-            echo "警告：未找到 auto_orientation_v2 插件目录"
           fi
 
-      # 6. 构建 arm64-v8a release APK
+      # 7. 构建 arm64-v8a release APK
       - name: Build arm64-v8a release APK
         run: flutter build apk --release --target-platform android-arm64
         working-directory: simple_live_app
 
-      # 7. 重命名并上传产物
+      # 8. 重命名并上传产物
       - name: Rename APK
         run: |
           mv simple_live_app/build/app/outputs/flutter-apk/app-release.apk \
